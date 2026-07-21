@@ -36,6 +36,9 @@ export default function Home() {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
+    setSelectedDoc(null);
+    setActiveDocuments([]);
+
     const userText = input;
     setInput("");
     setMessages((prev) => [...prev, { sender: "user", text: userText }]);
@@ -47,21 +50,29 @@ export default function Home() {
       let responseText = "";
       let responseDocs: MedicalDocument[] = [];
 
-      if (typeof botResponse === "object" && botResponse !== null) {
-        responseText = botResponse.text || botResponse.message || JSON.stringify(botResponse);
-        responseDocs = botResponse.documents || [];
-      } else {
-        responseText = botResponse;
+      // 1. Manejo seguro por si la respuesta viene como objeto o como string
+      let data = botResponse;
+      if (typeof botResponse === "string") {
+        try {
+          data = JSON.parse(botResponse);
+        } catch {
+          responseText = botResponse;
+        }
       }
 
-      // Si la respuesta trae documentos, actualizamos la lista global y mostramos la ÚLTIMA abierta
+      // 2. Extraemos priorizando 'data.response' (que es la clave real que envía FastAPI)
+      if (typeof data === "object" && data !== null) {
+        responseText = data.response || data.text || data.message || "";
+        responseDocs = data.documents || [];
+      }
+
+      // 3. Si la respuesta trae documentos, actualizamos la lista global
       if (responseDocs.length > 0) {
-        // Ordenamos por fecha descendente (la más reciente primero)
         const sortedDocs = [...responseDocs].sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
         setActiveDocuments(sortedDocs);
-        setSelectedDoc(sortedDocs[0]); // Selecciona la más reciente
+        setSelectedDoc(sortedDocs[0]);
       }
 
       setMessages((prev) => [
@@ -119,37 +130,49 @@ export default function Home() {
                     : "bg-slate-800 border border-slate-700 text-slate-200"
                 }`}
               >
-                <div>{msg.text}</div>
+                {/* MODIFICACIÓN AQUÍ: Renderizado limpio de texto */}
+                <div className="text-sm font-normal leading-relaxed">{msg.text}</div>
 
-                {/* Si la respuesta del agente trae adjuntos, los mostramos como fichas clicables */}
-                {msg.documents && msg.documents.length > 0 && (
+                {/* Muestra adjuntos ÚNICAMENTE si este mensaje concreto los contiene */}
+                {Array.isArray(msg.documents) && msg.documents.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
                     <p className="text-xs text-teal-300 font-semibold">
                       📁 Pruebas de imagen / informes del paciente:
                     </p>
                     <div className="flex flex-col gap-1.5">
-                      {msg.documents.map((doc) => (
-                        <button
-                          key={doc.id}
-                          onClick={() => {
-                            setActiveDocuments(msg.documents || []);
-                            setSelectedDoc(doc);
-                          }}
-                          className={`text-xs p-2 rounded flex items-center justify-between border transition-all ${
-                            selectedDoc?.id === doc.id
-                              ? "bg-teal-950 border-teal-500 text-teal-200 font-semibold"
-                              : "bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 truncate">
-                            <span>{doc.content_type.startsWith("image/") ? "🧠" : "📄"}</span>
-                            <span className="truncate">{doc.title}</span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">
-                            {new Date(doc.date).toLocaleDateString()}
-                          </span>
-                        </button>
-                      ))}
+                      {msg.documents.map((doc, idx) => {
+                        // 1. Detección segura del tipo de contenido (imagen vs documento)
+                        const contentType = doc?.content_type || doc?.mime_type || "";
+                        const isImage = contentType.startsWith("image/");
+
+                        // 2. Formateo seguro de la fecha
+                        const formattedDate = doc?.date 
+                          ? new Date(doc.date).toLocaleDateString() 
+                          : "Sin fecha";
+
+                        return (
+                          <button
+                            key={doc.id || `doc-${idx}`}
+                            onClick={() => {
+                              setActiveDocuments(msg.documents || []);
+                              setSelectedDoc(doc);
+                            }}
+                            className={`text-xs p-2 rounded flex items-center justify-between border transition-all ${
+                              selectedDoc?.id === doc.id
+                                ? "bg-teal-950 border-teal-500 text-teal-200 font-semibold"
+                                : "bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <span>{isImage ? "🧠" : "📄"}</span>
+                              <span className="truncate">{doc.title || doc.name || "Documento sin título"}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">
+                              {formattedDate}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

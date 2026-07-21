@@ -25,6 +25,12 @@ PATIENT_REGISTRY: dict[str, str] = {
 }
 
 
+def _resolve_patient_id(patient_id: str) -> str:
+    """Traduce un DNI/NIE/ID local al ID numérico de HAPI FHIR si existe en el registro."""
+    cleaned_id = str(patient_id).strip().upper()
+    return PATIENT_REGISTRY.get(cleaned_id, patient_id)
+
+
 def _fetch_fhir_resource(endpoint: str, params: dict | None = None) -> dict[str, Any]:
     """Realiza una petición HTTP GET al servidor FHIR público y retorna el JSON."""
     url = f"{FHIR_BASE_URL}/{endpoint}"
@@ -40,15 +46,16 @@ def _fetch_fhir_resource(endpoint: str, params: dict | None = None) -> dict[str,
 
 def get_patient_demographics(patient_id: str) -> dict[str, Any]:
     """Obtiene y valida la demografía de un paciente real desde HAPI FHIR."""
+    fhir_id = _resolve_patient_id(patient_id)
     try:
-        raw_data = _fetch_fhir_resource(f"Patient/{patient_id}")
+        raw_data = _fetch_fhir_resource(f"Patient/{fhir_id}")
         patient_obj = Patient.model_validate(raw_data)
         return patient_obj.model_dump(exclude_none=True)
     except Exception:
         fallback_data = {
             "resourceType": "Patient",
-            "id": patient_id,
-            "name": [{"given": ["Paciente"], "family": f"FHIR ({patient_id})"}],
+            "id": fhir_id,
+            "name": [{"given": ["Paciente"], "family": f"FHIR ({fhir_id})"}],
             "birthDate": "1990-01-01",
             "gender": "unknown"
         }
@@ -57,8 +64,9 @@ def get_patient_demographics(patient_id: str) -> dict[str, Any]:
 
 def get_patient_vitals(patient_id: str) -> list[dict[str, Any]]:
     """Obtiene las observaciones/constantes vitales del paciente desde HAPI FHIR."""
+    fhir_id = _resolve_patient_id(patient_id)
     try:
-        bundle = _fetch_fhir_resource("Observation", params={"patient": patient_id, "_count": 10})
+        bundle = _fetch_fhir_resource("Observation", params={"patient": fhir_id, "_count": 10})
         entries = bundle.get("entry", [])
         vitals = []
         for entry in entries:
@@ -73,8 +81,9 @@ def get_patient_vitals(patient_id: str) -> list[dict[str, Any]]:
 
 def get_patient_allergies(patient_id: str) -> list[dict[str, Any]]:
     """Obtiene las alergias e intolerancias del paciente desde HAPI FHIR."""
+    fhir_id = _resolve_patient_id(patient_id)
     try:
-        bundle = _fetch_fhir_resource("AllergyIntolerance", params={"patient": patient_id, "_count": 10})
+        bundle = _fetch_fhir_resource("AllergyIntolerance", params={"patient": fhir_id, "_count": 10})
         entries = bundle.get("entry", [])
         allergies = []
         for entry in entries:
@@ -89,8 +98,9 @@ def get_patient_allergies(patient_id: str) -> list[dict[str, Any]]:
 
 def get_patient_medications(patient_id: str) -> list[dict[str, Any]]:
     """Obtiene las prescripciones de medicamentos del paciente desde HAPI FHIR."""
+    fhir_id = _resolve_patient_id(patient_id)
     try:
-        bundle = _fetch_fhir_resource("MedicationRequest", params={"patient": patient_id, "_count": 10})
+        bundle = _fetch_fhir_resource("MedicationRequest", params={"patient": fhir_id, "_count": 10})
         entries = bundle.get("entry", [])
         meds = []
         for entry in entries:
@@ -105,8 +115,9 @@ def get_patient_medications(patient_id: str) -> list[dict[str, Any]]:
 
 def get_patient_documents(patient_id: str) -> list[dict[str, Any]]:
     """Obtiene y normaliza las pruebas/documentos del paciente para el visor de React."""
+    fhir_id = _resolve_patient_id(patient_id)
     try:
-        bundle = _fetch_fhir_resource("DocumentReference", params={"patient": patient_id, "_count": 10})
+        bundle = _fetch_fhir_resource("DocumentReference", params={"patient": fhir_id, "_count": 10})
         entries = bundle.get("entry", [])
         docs = []
         
@@ -114,11 +125,9 @@ def get_patient_documents(patient_id: str) -> list[dict[str, Any]]:
             res = entry.get("resource", {})
             if res.get("resourceType") == "DocumentReference":
                 doc_id = res.get("id", "doc-01")
-                # Extraemos el título o descripción
                 title = res.get("description") or "Resonancia Magnética / Informe"
                 date = res.get("date", "2024-01-01")[:10]
                 
-                # Extraemos el adjunto (URL y tipo MIME)
                 content_list = res.get("content", [])
                 attachment = content_list[0].get("attachment", {}) if content_list else {}
                 
@@ -133,11 +142,10 @@ def get_patient_documents(patient_id: str) -> list[dict[str, Any]]:
                     "date": str(date)
                 })
         
-        # Si el paciente no tiene DocumentReference creados en HAPI, devolvemos uno de prueba para que se abra el visor
         if not docs:
             docs = [
                 {
-                    "id": f"mri-{patient_id}",
+                    "id": f"mri-{fhir_id}",
                     "title": "Resonancia Magnética Cerebral (RMN)",
                     "content_type": "image/jpeg",
                     "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Head_MRI_slice.jpg/600px-Head_MRI_slice.jpg",
@@ -148,7 +156,7 @@ def get_patient_documents(patient_id: str) -> list[dict[str, Any]]:
     except Exception:
         return [
             {
-                "id": f"mri-fallback",
+                "id": "mri-fallback",
                 "title": "Resonancia Magnética Cerebral (RMN)",
                 "content_type": "image/jpeg",
                 "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Head_MRI_slice.jpg/600px-Head_MRI_slice.jpg",
