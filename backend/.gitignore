@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# Python virtual environment
+.venv/
+
+# MCP runtime log
+mcp_server_log.txt
+.env

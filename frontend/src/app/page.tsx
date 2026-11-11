@@ -1,12 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import { sendChatMessage } from "@/lib/api";
 
 export interface MedicalDocument {
   id: string;
   title: string;
   content_type: string;
+  mime_type?: string;
+  name?: string;
   url: string;
   date: string;
   category?: string;
@@ -27,6 +31,7 @@ export default function Home() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [lastPatientId, setLastPatientId] = useState<string | null>(null);
 
   // Lista de todos los documentos del paciente activo y el documento seleccionado actualmente
   const [activeDocuments, setActiveDocuments] = useState<MedicalDocument[]>([]);
@@ -45,26 +50,13 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const botResponse = await sendChatMessage(userText);
+      const botResponse = await sendChatMessage(userText, lastPatientId);
+      setLastPatientId(botResponse.last_patient_id);
 
-      let responseText = "";
-      let responseDocs: MedicalDocument[] = [];
-
-      // 1. Manejo seguro por si la respuesta viene como objeto o como string
-      let data = botResponse;
-      if (typeof botResponse === "string") {
-        try {
-          data = JSON.parse(botResponse);
-        } catch {
-          responseText = botResponse;
-        }
-      }
-
-      // 2. Extraemos priorizando 'data.response' (que es la clave real que envía FastAPI)
-      if (typeof data === "object" && data !== null) {
-        responseText = data.response || data.text || data.message || "";
-        responseDocs = data.documents || [];
-      }
+      const responseText = botResponse.response || "";
+      const responseDocs = Array.isArray(botResponse.documents)
+        ? (botResponse.documents as MedicalDocument[])
+        : [];
 
       // 3. Si la respuesta trae documentos, actualizamos la lista global
       if (responseDocs.length > 0) {
@@ -130,8 +122,35 @@ export default function Home() {
                     : "bg-slate-800 border border-slate-700 text-slate-200"
                 }`}
               >
-                {/* MODIFICACIÓN AQUÍ: Renderizado limpio de texto */}
-                <div className="text-sm font-normal leading-relaxed">{msg.text}</div>
+                <div className="text-sm font-normal leading-relaxed">
+                  {msg.sender === "agent" ? (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkBreaks]}
+                      components={{
+                        p: ({ children }) => (
+                          <p className="mb-1 last:mb-0">{children}</p>
+                        ),
+                        li: ({ children }) => (
+                          <li className="my-0 py-0">{children}</li>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="my-1 list-disc space-y-0 pl-5">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="my-1 list-decimal space-y-0 pl-5">
+                            {children}
+                          </ol>
+                        ),
+                      }}
+                    >
+                      {msg.text}
+                    </ReactMarkdown>
+                  ) : (
+                    msg.text
+                  )}
+                </div>
 
                 {/* Muestra adjuntos ÚNICAMENTE si este mensaje concreto los contiene */}
                 {Array.isArray(msg.documents) && msg.documents.length > 0 && (
